@@ -11,6 +11,14 @@ async def wait_for_landing(drone):
             break
 
 
+async def watch_connection(drone, status):
+    async for state in drone.core.connection_state():
+        if not state.is_connected:
+            print("!! Verbindung zur Drohne verloren!")
+            status["connected"] = False
+            break
+
+
 async def run():
     drone = System()
     await drone.connect(system_address="udpin://0.0.0.0:14540")
@@ -26,6 +34,9 @@ async def run():
         if health:
             print("-- Health-Check OK")
             break
+
+    status = {"connected": True}
+    watcher = asyncio.create_task(watch_connection(drone, status))
 
     print("Armiere...")
     await drone.action.arm()
@@ -56,6 +67,9 @@ async def run():
 
     print("-- Offboard aktiv, fliege 3 m nach Norden...")
     for _ in range(80):
+        if not status["connected"]:
+            print("Abbruch: Verbindung verloren, stoppe Setpoints.")
+            break
         await drone.offboard.set_position_ned(PositionNedYaw(3.0, 0.0, -2.5, 0.0))
         await asyncio.sleep(0.1)
 
@@ -75,6 +89,12 @@ async def run():
         await asyncio.wait_for(wait_for_landing(drone), timeout=30)
     except asyncio.TimeoutError:
         print("Timeout: keine Landebestätigung nach 30s")
+
+    watcher.cancel()
+    try:
+        await watcher
+    except asyncio.CancelledError:
+        pass
 
 
 asyncio.run(run())
